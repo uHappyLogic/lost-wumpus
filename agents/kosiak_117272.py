@@ -1,7 +1,14 @@
+import random
+
 from action import Action
 import numpy as np
 import copy as cp
 import operator
+
+
+def d_print(param):
+    if False:
+        print param
 
 
 class Agent:
@@ -20,6 +27,15 @@ class Agent:
         self.map = [[str(x) for x in line ] for line in areaMap]
 
         self.find_exit_coord()
+
+        self.last_move = '.'
+        self.opposite_move = {
+            Action.DOWN : Action.UP,
+            Action.UP : Action.DOWN,
+            Action.RIGHT: Action.LEFT,
+            Action.LEFT: Action.RIGHT,
+            '.': '.'
+        }
 
         self.conditional_probs = {
             (True, 'J'): self.pj,
@@ -56,7 +72,13 @@ class Agent:
 
         self.hist[self.exit_coords[0]][self.exit_coords[1]] = 0
 
+        self.prepare_directions()
+
+        for line in self.directions:
+            print line
+        print '============================================'
         # output
+        return
 
         print 'params p={0} pj={1} pn={2}'.format(self.p, self.pj, self.pn)
 
@@ -78,10 +100,11 @@ class Agent:
         return
 
     def sense(self, sensor):
-        print '=================================MOVE START=============================='
+        # print '=================================MOVE START{0}=============================='.format(self.times_moved)
 
-        print "Sense {0} = {1}".format(self.times_moved, sensor)
+        # print "Sense {0} = {1}".format(self.times_moved, sensor)
         self.apply_sense_on_histo(sensor)
+        self.normalize_hist()
         self.print_pretty_hist()
 
     # nie zmieniac naglowka metody, tutaj agent decyduje w ktora strone sie ruszyc,
@@ -89,18 +112,20 @@ class Agent:
     def move(self):
         self.times_moved += 1
         current_decision = self.calculate_direction()
-        print 'Moving = {0}'.format(current_decision)
+        # print 'Moving = {0}'.format(current_decision)
 
         self.move_histo(current_decision)
         self.print_pretty_hist()
 
-        print 'Normalizing'
+        # print 'Normalizing'
         self.normalize_hist()
 
         self.print_pretty_hist()
-        print '=================================MOVE {0} END=============================='.format(self.times_moved)
+        # print '=================================MOVE {0} END=============================='.format(self.times_moved)
 
         # exit()
+        self.last_move = current_decision
+
         return current_decision
 
     # nie zmieniac naglowka metody, tutaj agent udostepnia swoj histogram (ten z filtru
@@ -114,55 +139,123 @@ class Agent:
     # =======================================CUSTOM================================================
     # =============================================================================================
 
-    def calculate_direction(self):
-        result = {act: 0 for act in [Action.UP, Action.DOWN, Action.RIGHT, Action.LEFT]}
+
+    def prepare_directions(self):
+        self.directions = [
+            [
+                [] for j in range(self.height)
+            ] for i in range(self.width)
+        ]
 
         for i in range(self.width):
             for j in range(self.height):
+
                 if [i, j] == self.exit_coords:
+                    self.directions[i][j] = ['===w====']
                     continue
 
-                avail_decisions = []
+                direction = []
 
                 v_d_inner = self.exit_coords[1] - j
 
                 # print 'v_d_inner={0}'.format(v_d_inner)
 
                 if v_d_inner < 0:
-                    avail_decisions.append([abs(v_d_inner), Action.LEFT])
-                    avail_decisions.append([self.width - i + self.exit_coords[1] , Action.RIGHT])
+                    outer_d = (self.width - j + self.exit_coords[1])
+                    v_d_inner = abs(v_d_inner)
+
+                    if v_d_inner < outer_d:
+                        direction.append(Action.LEFT)
+                    elif v_d_inner > outer_d:
+                        direction.append(Action.RIGHT)
+                    else:
+                        direction.append(Action.RIGHT if j % 2 == 0 else Action.LEFT)
                 elif v_d_inner > 0:
-                    avail_decisions.append([v_d_inner, Action.RIGHT])
-                    avail_decisions.append([i + self.height - self.exit_coords[1] , Action.LEFT])
+                    outer_d = (j + self.width - self.exit_coords[1])
+
+                    if v_d_inner < outer_d:
+                        direction.append(Action.RIGHT)
+                    elif v_d_inner > outer_d:
+                        direction.append(Action.LEFT)
+                    else:
+                        direction.append(Action.LEFT if j % 2 == 0 else Action.RIGHT)
 
                 h_d_inner = self.exit_coords[0] - i
 
                 if h_d_inner < 0:
-                    avail_decisions.append([abs(h_d_inner), Action.UP])
-                    avail_decisions.append([self.width - j + self.exit_coords[0], Action.DOWN])
+                    h_d_inner = abs(h_d_inner)
+                    outer_d = (self.height - i + self.exit_coords[0])
+
+                    if h_d_inner < outer_d:
+                        direction.append(Action.UP)
+                    elif h_d_inner > outer_d:
+                        direction.append(Action.DOWN)
+                    else:
+                        direction.append(Action.UP if j % 2 == 0 else Action.DOWN)
                 elif h_d_inner > 0:
-                    avail_decisions.append([h_d_inner, Action.DOWN])
-                    avail_decisions.append([i + self.width - self.exit_coords[0], Action.UP])
+                    outer_d = (i + self.height - self.exit_coords[0])
 
-                min_d = min(avail_decisions, key=lambda x:x[0])[0]
+                    if h_d_inner < outer_d:
+                        direction.append(Action.DOWN)
+                    elif h_d_inner > outer_d:
+                        direction.append(Action.UP)
+                    else:
+                        direction.append(Action.DOWN if j % 2 == 0 else Action.UP)
 
-                # print 'coord [{0},{1}]'.format(i,j)
-                # print min_d
-                # print 'all {0}'.format(avail_decisions)
+                self.directions[i][j] = direction
 
-                avail_decisions = [ad for ad in avail_decisions if ad[0] == min_d]
-                # print 'min {0}'.format(avail_decisions)
 
-                for av in avail_decisions:
-                    result[av[1]] += self.hist[i][j]
+    def calculate_direction(self):
+        result = {act: [0,0] for act in [Action.UP, Action.DOWN, Action.RIGHT, Action.LEFT]}
 
-        return max(result.iteritems(), key=operator.itemgetter(1))[0]
+        for i in range(self.width):
+            for j in range(self.height):
+                if [i, j] == self.exit_coords:
+                    continue
+
+                if self.hist[i][j] <= 0.9:
+                    continue
+
+                for av in self.directions[i][j]:
+                    if self.is_opposite_to_last(av):
+                        continue
+                    result[av][0] += self.hist[i][j]
+                    result[av][1] += 1
+
+        d_print('------------------------')
+        d_print(result)
+        for choice in result:
+            if result[choice][1] > 0:
+                result[choice][0] /= float(result[choice][1])
+        d_print('------------------------')
+        d_print(result)
+        d_print( '------------------------')
+        final_decision = self.weighted_choice(result)
+
+        return final_decision
+
+
+    def is_opposite_to_last(self, move):
+        return self.opposite_move[self.last_move] == move
+
+
+    def weighted_choice(self, choices):
+
+        total = 0
+        for choice in choices:
+            total += choices[choice][0]
+
+        r = random.uniform(0, total)
+        upto = 0
+        for choice in choices:
+            if upto + choices[choice][0] >= r:
+               return choice
+            upto += choices[choice][0]
+
 
     def get_transition_functions(self, direction):
-        v = 0 + (1 if direction == Action.UP else 0) - (1 if direction == Action.DOWN else 0)
+        v = 0 + (1 if direction == Action.DOWN else 0) - (1 if direction == Action.UP else 0)
         h = (1 if direction == Action.RIGHT else 0) - (1 if direction == Action.LEFT else 0)
-
-        print 'v={0} h={1}'.format(v,h)
 
         return [
             [lambda i, j: [(i + v) % self.width, (j + h) % self.height], self.p],
@@ -174,9 +267,6 @@ class Agent:
 
     def move_histo(self, direction):
         old = cp.deepcopy(self.hist)
-
-        print 'old[4,9]={0}'.format(old[4][9])
-        print 'old[4,6]={0}'.format(old[4][6])
 
         for y in range(self.height):
             for x in range(self.width):
@@ -196,6 +286,7 @@ class Agent:
         for i in range(self.width):
             for j in range(self.height):
                 if self.map[i][j] == 'W':
+                    self.hist[i][j] = 0
                     continue
 
                 self.hist[i][j] *= self.bayes_probs[self.map[i][j], sense]
@@ -206,10 +297,10 @@ class Agent:
 
         for i in range(self.width):
             for j in range(self.height):
-                self.hist[i][j] = max(self.hist[i][j]/ max_val, 0.001)
+                self.hist[i][j] = max(self.hist[i][j]/ max_val, 0.00000001)
 
     def print_pretty_hist(self):
-        # return
+        return
         print "\n".join([" ".join(["{0:.3f}".format(el) for el in line]) for line in self.hist])
 
     def find_exit_coord(self):
